@@ -39,7 +39,6 @@ class _GeoIntelScreenState extends State<GeoIntelScreen> {
         child: Column(
           children: [
             _buildTopAppBar(context),
-            _buildSubTabs(),
             _buildFilters(),
             Expanded(
               child: SingleChildScrollView(
@@ -220,45 +219,6 @@ class _GeoIntelScreenState extends State<GeoIntelScreen> {
           const SizedBox(width: 12),
           Text(title, style: TextStyle(color: isDestructive ? CyberTheme.red : CyberTheme.textMain, fontSize: 14)),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSubTabs() {
-    final tabs = ['Overview', 'Feed', 'Analytics', 'GeoIntel', 'Threat', 'Sources', 'Reports'];
-    return SizedBox(
-      height: 30,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse}),
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: tabs.length,
-          itemBuilder: (context, index) {
-            final tabName = tabs[index];
-            final isActive = tabName == 'GeoIntel'; // Set GeoIntel aktif
-            
-            // --- PERBAIKAN: Menambahkan fungsi navigasi di Sub-Tabs ---
-            return InkWell(
-              onTap: () {
-                if (tabName == 'Overview') {
-                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DashboardScreen()));
-                } else if (tabName == 'Feed') {
-                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const FeedScreen()));
-                } else if (tabName == 'Analytics') {
-                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AnalyticsScreen()));
-                }
-              },
-              child: Container(
-                margin: const EdgeInsets.only(right: 16),
-                decoration: isActive ? const BoxDecoration(border: Border(bottom: BorderSide(color: CyberTheme.cyan, width: 2))) : null,
-                child: Center(
-                  child: Text(tabName, style: TextStyle(color: isActive ? CyberTheme.textMain : CyberTheme.textSec, fontSize: 10, fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
-                ),
-              ),
-            );
-          },
-        ),
       ),
     );
   }

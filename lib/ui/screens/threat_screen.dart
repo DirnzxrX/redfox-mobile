@@ -39,7 +39,6 @@ class _ThreatScreenState extends State<ThreatScreen> {
         child: Column(
           children: [
             _buildTopAppBar(context),
-            _buildSubTabs(),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -247,66 +246,6 @@ class _ThreatScreenState extends State<ThreatScreen> {
     );
   }
 
-  Widget _buildSubTabs() {
-    final tabs = ['Overview', 'Threat', 'Threat Feed', 'Anomaly Detection', 'Bot Activity', 'Disinformation', 'Reports'];
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: SizedBox(
-              height: 30,
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse}),
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: tabs.length,
-                  itemBuilder: (context, index) {
-                    final tabName = tabs[index];
-                    final isActive = tabName == 'Threat'; // Set Threat aktif
-                    
-                    return InkWell(
-                      onTap: () {
-                        if (tabName == 'Overview') Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DashboardScreen()));
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 16),
-                        decoration: isActive ? const BoxDecoration(border: Border(bottom: BorderSide(color: CyberTheme.cyan, width: 2))) : null,
-                        child: Center(
-                          child: Text(tabName, style: TextStyle(color: isActive ? CyberTheme.textMain : CyberTheme.textSec, fontSize: 10, fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-          Container(
-            height: 24, padding: const EdgeInsets.symmetric(horizontal: 8), margin: const EdgeInsets.only(right: 12),
-            decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-            child: Row(
-              children: [
-                Container(width: 6, height: 6, decoration: const BoxDecoration(color: CyberTheme.green, shape: BoxShape.circle)),
-                const SizedBox(width: 4),
-                const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('LIVE', style: TextStyle(color: CyberTheme.green, fontSize: 8, fontWeight: FontWeight.bold)),
-                    Text('Realtime', style: TextStyle(color: CyberTheme.green, fontSize: 5)),
-                  ],
-                ),
-                const SizedBox(width: 6),
-                const Icon(Icons.show_chart, color: CyberTheme.cyan, size: 12),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
 
   // ===========================================================================
   // WIDGET BUILDERS: CARDS & CHARTS

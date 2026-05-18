@@ -39,7 +39,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: Column(
           children: [
             _buildTopAppBar(context),
-            _buildSubTabs(),
             _buildFilters(),
             Expanded(
               child: SingleChildScrollView(
@@ -219,31 +218,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           const SizedBox(width: 12),
           Text(title, style: TextStyle(color: isDestructive ? CyberTheme.red : CyberTheme.textMain, fontSize: 14)),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSubTabs() {
-    final tabs = ['Overview', 'Sentiment', 'Demographic', 'Engagement', 'Hashtag', 'Sources', 'Geo', 'Trends'];
-    return SizedBox(
-      height: 30,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse}),
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          itemCount: tabs.length,
-          itemBuilder: (context, index) {
-            final isActive = index == 0;
-            return Container(
-              margin: const EdgeInsets.only(right: 16),
-              decoration: isActive ? const BoxDecoration(border: Border(bottom: BorderSide(color: CyberTheme.cyan, width: 2))) : null,
-              child: Center(
-                child: Text(tabs[index], style: TextStyle(color: isActive ? CyberTheme.textMain : CyberTheme.textSec, fontSize: 10, fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
-              ),
-            );
-          },
-        ),
       ),
     );
   }
