@@ -67,22 +67,23 @@ class ApiService {
     }
   }
 
-  // --- FUNGSI AMBIL DATA DASHBOARD (MENDUKUNG MULTI PROJECT) ---
+  // --- FUNGSI AMBIL DATA DASHBOARD (DIOPTIMALKAN) ---
   static Future<Map<String, dynamic>> getDashboardData({List<int>? projectIds}) async {
-    // Bangun URL dengan parameter array
-    String urlString = '$baseUrl/dashboard';
+    // Gunakan Uri untuk membangun query secara benar
+    var uri = Uri.parse('$baseUrl/dashboard');
     
+    // Jika ada projectIds, tambahkan sebagai query parameter
     if (projectIds != null && projectIds.isNotEmpty) {
-      // Mengubah List [1, 2] menjadi string "?project_id[]=1&project_id[]=2"
-      final queryParams = projectIds.map((id) => 'project_id[]=$id').join('&');
-      urlString += '?$queryParams';
+      // Mengirim sebagai list integer agar dikonversi otomatis oleh dart menjadi project_id[]=1&project_id[]=2
+      uri = uri.replace(queryParameters: {
+        'project_id[]': projectIds.map((id) => id.toString()).toList(),
+      });
     }
-    
-    final url = Uri.parse(urlString);
-    print('[API] GET Request to: $url');
+
+    print('[API] GET Request to: $uri');
 
     try {
-      final response = await http.get(url, headers: _getHeaders());
+      final response = await http.get(uri, headers: _getHeaders());
       if (response.statusCode == 200) {
         return {'success': true, 'data': json.decode(response.body)};
       } else if (response.statusCode == 401) {
@@ -95,7 +96,7 @@ class ApiService {
     }
   }
 
-  // --- FUNGSI AMBIL DATA PARAMETER (DAFTAR PROJECT DLL) ---
+  // --- FUNGSI AMBIL DATA PARAMETER ---
   static Future<Map<String, dynamic>> getDashboardParameters() async {
     try {
       final response = await http.get(Uri.parse('$baseUrl/dashboard/parameters'), headers: _getHeaders());
@@ -113,8 +114,6 @@ class ApiService {
 
   // --- FUNGSI LOGOUT ---
   static Future<void> logout() async {
-    // Optional: Panggil API logout di server jika diperlukan
-    // await http.post(Uri.parse('$baseUrl/logout'), headers: _getHeaders());
     _token = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
