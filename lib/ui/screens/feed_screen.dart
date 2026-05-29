@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'dart:math' as math;
 
 import 'profile_screen.dart';
+import 'dashboard_screen.dart';
 import 'settings_screen.dart';
 import 'analytics_screen.dart'; 
 import 'geointel_screen.dart';
@@ -879,7 +880,10 @@ class _FeedScreenState extends State<FeedScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _navItem(Icons.dashboard, 'Dashboard', onTap: () {
-            Navigator.pop(context); // Kembali ke Dashboard
+            Navigator.pushReplacement(
+    context, 
+    MaterialPageRoute(builder: (_) => const DashboardScreen()) // Pastikan nama class Dashboard Anda sesuai
+  ); // Kembali ke Dashboard
           }),
           
           _navItem(Icons.wifi_tethering, 'Feed', isActive: true),

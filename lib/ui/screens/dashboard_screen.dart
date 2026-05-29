@@ -1,27 +1,36 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/material.dart';
+
+import '../../data/api_service.dart';
+import 'analytics_screen.dart';
+import 'auth/login_screen.dart';
+import 'feed_screen.dart';
+import 'geointel_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
-import 'feed_screen.dart';
-import 'analytics_screen.dart';
-import 'geointel_screen.dart';
-import 'threat_screen.dart'; // Import GeoIntel ditambahkan
+import 'threat_screen.dart';
 
-// --- TEMA KHUSUS DESAIN BARU ---
 class CyberTheme {
-  static const Color background = Color(0xFF040A15);
-  static const Color cardBg = Color(0xFF0A1326);
-  static const Color border = Color(0xFF162545);
-  static const Color cyan = Color(0xFF00D2FF);
-  static const Color green = Color(0xFF00E676);
-  static const Color red = Color(0xFFFF3B30);
-  static const Color warning = Color(0xFFFF9500);
-  static const Color textMain = Colors.white;
-  static const Color textSec = Color(0xFF7A8Baa);
-  static const Color darkBlue = Color(0xFF1A365D);
+  static const Color background = Color(0xFF070A12);
+  static const Color backgroundDeep = Color(0xFF03050B);
+  static const Color panel = Color(0xFF111827);
+  static const Color panelSoft = Color(0xFF192235);
+  static const Color panelRaised = Color(0xFF202A40);
+  static const Color surface = Color(0xFF121A2B);
+  static const Color surfaceLow = Color(0xFF0C1321);
+  static const Color line = Color(0xFF2A3449);
+  static const Color shadow = Color(0xFF01030A);
+  static const Color mint = Color(0xFF9EF7D0);
+  static const Color blush = Color(0xFFFF9FB6);
+  static const Color lavender = Color(0xFFC8B8FF);
+  static const Color sky = Color(0xFF93E7FF);
+  static const Color amber = Color(0xFFFFD6A5);
+  static const Color highlight = Color(0xFFEFF6FF);
+  static const Color textMain = Color(0xFFF6F8FF);
+  static const Color textSec = Color(0xFFA7B0C5);
+  static const Color textMuted = Color(0xFF697389);
 }
 
 class DashboardScreen extends StatefulWidget {
@@ -32,217 +41,506 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  bool _isLoading = true;
+  
+  Map<String, dynamic> _dashboardData = {};
+  Map<String, dynamic> _parametersData = {}; 
+  Map<String, dynamic> _userData = {}; 
+  
+  // FIX: Menggunakan List<int> yang benar-benar cocok dengan api_service.dart
+  List<int> _selectedProjectIds = []; 
+  final GlobalKey _projectMenuKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  // Mengambil 3 API sekaligus: Dashboard KPI, Parameters, dan Current User
+  Future<void> _fetchDashboardData() async {
+    final results = await Future.wait([
+      // FIX: Memanggil projectIds (jamak) sesuai dengan parameter di api_service.dart terbaru
+      ApiService.getDashboardData(projectIds: _selectedProjectIds),
+      ApiService.getDashboardParameters(),
+      ApiService.getCurrentUser(),
+    ]);
+
+    final dashResult = results[0];
+    final paramResult = results[1];
+    final userResult = results[2];
+
+    if (!mounted) return;
+
+    if (dashResult['success'] == true && paramResult['success'] == true) {
+      setState(() {
+        _dashboardData = dashResult['data']['data'] ?? {};
+        _parametersData = paramResult['data']['data'] ?? {};
+        _userData = userResult['success'] == true ? (userResult['data']['data'] ?? {}) : {};
+        
+        // Auto-centang project yang statusnya true dari API jika masih kosong
+        if (_selectedProjectIds.isEmpty && _parametersData['projects'] != null) {
+          for (var p in _parametersData['projects']) {
+            if (p['status'] == true) {
+              _selectedProjectIds.add(p['id']);
+            }
+          }
+        }
+        
+        _isLoading = false;
+      });
+    } else {
+      setState(() {
+        _isLoading = false;
+      });
+      
+      final errorMessage = dashResult['success'] == false ? dashResult['message'] : paramResult['message'];
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: CyberTheme.blush,
+          content: Text(
+            errorMessage.toString(),
+            style: const TextStyle(color: CyberTheme.highlight),
+          ),
+        ),
+      );
+
+      if (dashResult['is_unauthorized'] == true || paramResult['is_unauthorized'] == true || userResult['is_unauthorized'] == true) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    }
+  }
+
+  String _formatNumber(num? value) {
+    if (value == null) return '0';
+    if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(1)}M';
+    if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
+    return value.toStringAsFixed(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: CyberTheme.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTopAppBar(context),
-            _buildSearchBar(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // --- 1. TOP STATS GRID (2x4) ---
-                    _buildTopStatsGrid(),
-                    const SizedBox(height: 12),
-
-                    // --- 2. ROW: TIMELINE & SOURCES ---
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 5, child: _buildSentimentTimeline()),
-                        const SizedBox(width: 10),
-                        Expanded(flex: 4, child: _buildSourceDistribution()),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // --- 3. ROW: MENTIONS & ANOMALY ---
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 1, child: _buildMentionsOverTime()),
-                        const SizedBox(width: 10),
-                        Expanded(flex: 1, child: _buildAnomalyDetection()),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // --- 4. INDONESIA INTELLIGENCE MAP ---
-                    _buildMapSection(),
-                    const SizedBox(height: 12),
-
-                    // --- 5. 4-COLUMN HIGHLIGHTS (Scrollable Horizontal biar gak pecah di HP) ---
-                    SizedBox(
-                      height: 180,
-                      child: ScrollConfiguration(
-                        behavior: ScrollConfiguration.of(context).copyWith(
-                          dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
-                        ),
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          clipBehavior: Clip.none,
-                          children: [
-                            _buildInfoCardWide('AI INTELLIGENCE SUMMARY', _buildAiSummaryContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('THREAT ALERT CENTER', _buildAlertCenterContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('SUSPICIOUS ACTIVITY', _buildSuspiciousContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('BOT DETECTION', _buildBotContent()),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // --- 6. 4-COLUMN BOTTOM (Scrollable) ---
-                    SizedBox(
-                      height: 140,
-                      child: ScrollConfiguration(
-                        behavior: ScrollConfiguration.of(context).copyWith(
-                          dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
-                        ),
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          clipBehavior: Clip.none,
-                          children: [
-                            _buildInfoCard('TRENDING HASHTAGS', _buildHashtagsContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('VIRAL CONTENT', _buildViralContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('TOP AUTHORS', _buildTopAuthorsContent()),
-                            const SizedBox(width: 10),
-                            _buildInfoCard('ENGAGEMENT RATE', _buildEngagementContent()),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 100), // Spacing for bottom nav
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
       extendBody: true,
+      backgroundColor: CyberTheme.background,
+      body: Stack(
+        children: [
+          const _DashboardBackdrop(),
+          SafeArea(
+            child: Column(
+              children: [
+                _buildTopAppBar(context),
+                _buildSearchBar(),
+                Expanded(
+                  child: _isLoading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: CyberTheme.lavender,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : SingleChildScrollView(
+                          clipBehavior: Clip.none,
+                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 104),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildTopStatsGrid(),
+                              const SizedBox(height: 16),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    flex: 5,
+                                    child: _buildSentimentTimeline(),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 4,
+                                    child: _buildSourceDistribution(),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(child: _buildMentionsOverTime()),
+                                  const SizedBox(width: 12),
+                                  Expanded(child: _buildAnomalyDetection()),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildMapSection(),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                height: 188,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildInfoCardWide(
+                                      'AI Intelligence Summary',
+                                      _buildAiSummaryContent(),
+                                    ),
+                                    _buildInfoCard(
+                                      'Threat Alert Center',
+                                      _buildAlertCenterContent(),
+                                      accent: CyberTheme.blush,
+                                    ),
+                                    _buildInfoCard(
+                                      'Suspicious Activity',
+                                      _buildSuspiciousContent(),
+                                      accent: CyberTheme.amber,
+                                    ),
+                                    _buildInfoCard(
+                                      'Bot Detection',
+                                      _buildBotContent(),
+                                      accent: CyberTheme.lavender,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                height: 154,
+                                child: ListView(
+                                  scrollDirection: Axis.horizontal,
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildInfoCard(
+                                      'Trending Hashtags',
+                                      _buildHashtagsContent(),
+                                      accent: CyberTheme.sky,
+                                    ),
+                                    _buildInfoCard(
+                                      'Top Authors',
+                                      _buildTopAuthorsContent(),
+                                      accent: CyberTheme.mint,
+                                    ),
+                                    _buildInfoCard(
+                                      'Floating Keywords',
+                                      _buildTrendingKeywords(),
+                                      accent: CyberTheme.lavender,
+                                    ),
+                                    _buildInfoCard(
+                                      'Viral Content',
+                                      _buildViralContent(),
+                                      accent: CyberTheme.amber,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
       bottomNavigationBar: _buildCyberBottomNav(),
     );
   }
 
-  // ===========================================================================
-  // WIDGET BUILDERS
-  // ===========================================================================
-
+  // =====================================================================
+  // APP BAR DENGAN PROFIL TENGAH & MENU MULTI-SELECT PROJECT NATIVE
+  // =====================================================================
   Widget _buildTopAppBar(BuildContext context) {
+    // 1. Ambil Nama & Foto dari User yang login
+    final String userFullName = _userData['fullname'] ?? 'Analyst';
+    final String userRole = _userData['role']?['role_name'] ?? 'Guest';
+    final String userAvatar = _userData['avatar'] ?? 'https://ui-avatars.com/api/?name=$userFullName&background=0D8ABC&color=fff';
+
+    // 2. Tentukan Label Project Berdasarkan Jumlah Pilihan
+    final projects = _parametersData['projects'] as List? ?? [];
+    String projectName = 'All Projects';
+    if (_selectedProjectIds.isNotEmpty) {
+      if (_selectedProjectIds.length == 1) {
+        final activeProject = projects.firstWhere((p) => p['id'] == _selectedProjectIds.first, orElse: () => null);
+        projectName = activeProject != null ? activeProject['project_name'] : 'Unknown';
+      } else {
+        projectName = '${_selectedProjectIds.length} Projects Selected';
+      }
+    }
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: Row(
         children: [
-          // Logo AIRA
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Text('AIRA', style: TextStyle(color: CyberTheme.cyan, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
-              Text('Advanced Intelligence\nRecon & Analytics', style: TextStyle(color: CyberTheme.textSec, fontSize: 6, height: 1.2)),
-            ],
-          ),
+          const _BrandMark(),
           const SizedBox(width: 16),
-          // Profile
+
+          // TENGAH KIRI: Profile Menu 
           PopupMenuButton<String>(
-            offset: const Offset(0, 45),
-            color: CyberTheme.cardBg,
+            offset: const Offset(0, 46),
+            color: CyberTheme.surface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: CyberTheme.border),
+              borderRadius: BorderRadius.circular(18),
             ),
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'profile') {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen()));
-              } else if (value == 'settings') {
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsScreen()));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+              }
+              if (value == 'settings') {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              }
+              if (value == 'logout') {
+                await ApiService.logout();
+                if (!context.mounted) return;
+                Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
               }
             },
-            itemBuilder: (BuildContext context) => [
-              _buildPopupMenuItem('My Profile', Icons.person_outline, 'profile'),
-              _buildPopupMenuItem('Settings', Icons.settings_outlined, 'settings'),
+            itemBuilder: (context) => [
+              _buildPopupMenuItem('My Profile', Icons.person_outline_rounded, 'profile'),
+              _buildPopupMenuItem('Settings', Icons.tune_rounded, 'settings'),
               const PopupMenuDivider(height: 1),
-              _buildPopupMenuItem('Logout', Icons.logout, 'logout', isDestructive: true),
+              _buildPopupMenuItem('Logout', Icons.logout_rounded, 'logout', isDestructive: true),
             ],
             child: Row(
               children: [
-                const CircleAvatar(radius: 14, backgroundImage: NetworkImage('https://i.pravatar.cc/100?img=11')),
-                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: [CyberTheme.mint, CyberTheme.lavender],
+                    ),
+                    boxShadow: [
+                      BoxShadow(color: CyberTheme.shadow, blurRadius: 18, offset: const Offset(0, 8)),
+                    ],
+                  ),
+                  child: CircleAvatar(
+                    radius: 15,
+                    backgroundImage: NetworkImage(userAvatar), 
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Analyst', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)),
+                    Text(
+                      userFullName, 
+                      style: const TextStyle(
+                        color: CyberTheme.textMain, 
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     Row(
-                      children: const [
-                        Text('TNI AU', style: TextStyle(color: CyberTheme.textMain, fontSize: 10, fontWeight: FontWeight.bold)),
-                        SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down, color: CyberTheme.textSec, size: 12),
+                      children: [
+                        Text(
+                          userRole, 
+                          style: const TextStyle(color: CyberTheme.textSec, fontSize: 9),
+                        ),
+                        const SizedBox(width: 2),
+                        const Icon(Icons.keyboard_arrow_down_rounded, color: CyberTheme.textSec, size: 14),
                       ],
-                    )
+                    ),
                   ],
-                )
-              ],
-            ),
-          ),
-          const Spacer(),
-          // Project Selector
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text('Project', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Flexible(child: Text('TNI AU Monitoring', style: TextStyle(color: CyberTheme.textMain, fontSize: 10, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                    SizedBox(width: 2),
-                    Icon(Icons.keyboard_arrow_down, color: CyberTheme.textSec, size: 12),
-                  ],
-                )
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Notification
-          Stack(
-            children: [
-              const Icon(Icons.notifications_none, color: CyberTheme.textSec, size: 24),
-              Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: CyberTheme.red, shape: BoxShape.circle),
-                  child: const Text('3', style: TextStyle(color: Colors.white, fontSize: 6, fontWeight: FontWeight.bold)),
                 ),
-              )
-            ],
-          )
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // KANAN: Project Selector (Multi-Select Menu Custom Native)
+          InkWell(
+            key: _projectMenuKey,
+            onTap: _showProjectMultiSelect,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: CyberTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: CyberTheme.line),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Project',
+                    style: TextStyle(color: CyberTheme.textMuted, fontSize: 8),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        projectName, 
+                        style: const TextStyle(
+                          color: CyberTheme.textMain,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: CyberTheme.textSec,
+                        size: 14,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(width: 12),
+          const _IconBubble(icon: Icons.notifications_none_rounded),
         ],
       ),
     );
   }
 
-  // --- ITEM MENU DROPDOWN ---
-  PopupMenuItem<String> _buildPopupMenuItem(String title, IconData icon, String value, {bool isDestructive = false}) {
+  // =====================================================================
+  // FUNGSI CUSTOM DROPDOWN MULTI-SELECT (Tidak Pakai Set Sementara)
+  // =====================================================================
+  void _showProjectMultiSelect() {
+    final RenderBox renderBox = _projectMenuKey.currentContext!.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero);
+    final size = renderBox.size;
+    final projects = _parametersData['projects'] as List? ?? [];
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent, // Background transparan seperti menu biasa
+      builder: (BuildContext dialogContext) {
+        return Stack(
+          children: [
+            // Area luar untuk menutup modal
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pop(dialogContext);
+                  setState(() { _isLoading = true; });
+                  _fetchDashboardData();
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+            // Kotak Dropdown
+            Positioned(
+              top: offset.dy + size.height + 8,
+              right: MediaQuery.of(context).size.width - offset.dx - size.width,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 260,
+                  decoration: BoxDecoration(
+                    color: CyberTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: CyberTheme.line),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black54, blurRadius: 12, offset: Offset(0, 6)),
+                    ]
+                  ),
+                  child: StatefulBuilder(
+                    builder: (context, setModalState) {
+                      if (projects.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('No projects available', style: TextStyle(color: CyberTheme.textMuted)),
+                        );
+                      }
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ...projects.map((p) {
+                            final id = p['id'] as int;
+                            final isActive = _selectedProjectIds.contains(id);
+                            
+                            return InkWell(
+                              onTap: () {
+                                setModalState(() {
+                                  if (isActive) {
+                                    _selectedProjectIds.remove(id);
+                                  } else {
+                                    _selectedProjectIds.add(id);
+                                  }
+                                });
+                                // Update tulisan judul di AppBar di layar utama
+                                setState(() {}); 
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isActive ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                                      color: isActive ? CyberTheme.mint : CyberTheme.textSec,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        p['project_name'].toString(),
+                                        style: TextStyle(
+                                          color: isActive ? CyberTheme.textMain : CyberTheme.textSec,
+                                          fontSize: 11,
+                                          fontWeight: isActive ? FontWeight.w700 : FontWeight.normal,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          // Tombol Submit / Terapkan
+                          InkWell(
+                            onTap: () {
+                              Navigator.pop(dialogContext);
+                              setState(() { _isLoading = true; });
+                              _fetchDashboardData();
+                            },
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: const BoxDecoration(
+                                border: Border(top: BorderSide(color: CyberTheme.line))
+                              ),
+                              child: const Text('Terapkan Filter', style: TextStyle(color: CyberTheme.mint, fontWeight: FontWeight.bold, fontSize: 12)),
+                            )
+                          )
+                        ],
+                      );
+                    }
+                  )
+                )
+              )
+            )
+          ]
+        );
+      }
+    );
+  }
+
+  PopupMenuItem<String> _buildPopupMenuItem(
+    String title,
+    IconData icon,
+    String value, {
+    bool isDestructive = false,
+  }) {
+    final color = isDestructive ? CyberTheme.blush : CyberTheme.textMain;
     return PopupMenuItem<String>(
       value: value,
       child: Row(
         children: [
-          Icon(icon, color: isDestructive ? CyberTheme.red : CyberTheme.textSec, size: 18),
+          Icon(icon, color: color, size: 18),
           const SizedBox(width: 12),
-          Text(title, style: TextStyle(color: isDestructive ? CyberTheme.red : CyberTheme.textMain, fontSize: 14)),
+          Text(title, style: TextStyle(color: color, fontSize: 14)),
         ],
       ),
     );
@@ -250,981 +548,1328 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(18), border: Border.all(color: CyberTheme.border)),
+            child: _FloatingPanel(
+              radius: 22,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: const Row(
                 children: [
-                  Icon(Icons.search, color: CyberTheme.textSec, size: 16),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('Search intelligence, keywords, accounts, hashtags...', style: TextStyle(color: CyberTheme.textSec, fontSize: 10), overflow: TextOverflow.ellipsis)),
-                  Icon(Icons.tune, color: CyberTheme.cyan, size: 16),
+                  Icon(
+                    Icons.search_rounded,
+                    color: CyberTheme.textSec,
+                    size: 17,
+                  ),
+                  SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Search intelligence...',
+                      style: TextStyle(color: CyberTheme.textSec, fontSize: 12),
+                    ),
+                  ),
+                  Icon(
+                    Icons.tune_rounded,
+                    color: CyberTheme.lavender,
+                    size: 17,
+                  ),
                 ],
               ),
             ),
           ),
           const SizedBox(width: 12),
-          Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(18), border: Border.all(color: CyberTheme.border)),
+          const _FloatingPanel(
+            radius: 22,
+            padding: EdgeInsets.symmetric(horizontal: 13, vertical: 10),
             child: Row(
               children: [
-                Container(width: 6, height: 6, decoration: const BoxDecoration(color: CyberTheme.green, shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('LIVE', style: TextStyle(color: CyberTheme.green, fontSize: 10, fontWeight: FontWeight.bold)),
-                    Text('Realtime', style: TextStyle(color: CyberTheme.green, fontSize: 6)),
-                  ],
+                _SoftDot(color: CyberTheme.mint, size: 7),
+                SizedBox(width: 7),
+                Text(
+                  'LIVE',
+                  style: TextStyle(
+                    color: CyberTheme.mint,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-                const SizedBox(width: 8),
-                const Icon(Icons.show_chart, color: CyberTheme.cyan, size: 16),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
   }
 
+  // =====================================================================
+  // DATA KPI BERDASARKAN API
+  // =====================================================================
   Widget _buildTopStatsGrid() {
+    final kpis = _dashboardData['kpis'] ?? {};
+    final sentimentDist = kpis['sentiment_distribution'] ?? {};
+    final num pos = sentimentDist['positive'] ?? 0;
+    final num neu = sentimentDist['neutral'] ?? 0;
+    final num neg = sentimentDist['negative'] ?? 0;
+    final totalSent = pos + neu + neg;
+    final posPercent = totalSent > 0 ? ((pos / totalSent) * 100).toStringAsFixed(1) : '0';
+    final negPercent = totalSent > 0 ? ((neg / totalSent) * 100).toStringAsFixed(1) : '0';
+    final trendingKeywords = _dashboardData['top_trending_keywords'] as List? ?? [];
+    final threatScore = kpis['threat_score'];
+
     return GridView.count(
       crossAxisCount: 2,
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 2.3, // Proporsi kartu agar pas di HP
+      childAspectRatio: 2.16,
       children: [
-        _buildStatCard('TOTAL MENTIONS', '15.765.388', '+100%', CyberTheme.green, Icons.arrow_drop_up, miniChartMode: 1),
-        _buildStatCard('THREAT SCORE', '78 /100', 'High', CyberTheme.red, Icons.warning_amber_rounded, miniChartMode: 2, isThreat: true),
-        _buildStatCard('POSITIVE SENTIMENT', '68.2%', '', CyberTheme.green, Icons.sentiment_satisfied_alt, miniChartMode: 1, showSparklineOnly: true),
-        _buildStatCard('NEGATIVE SENTIMENT', '21.6%', '', CyberTheme.red, Icons.sentiment_very_dissatisfied, miniChartMode: 2, showSparklineOnly: true),
-        _buildStatCardIcon('ACTIVE SOURCES', '247', '+12%', CyberTheme.green, Icons.cell_tower, CyberTheme.cyan),
-        _buildStatCardIcon('TRENDING TOPICS', '128', '+8%', CyberTheme.green, Icons.local_fire_department, CyberTheme.red),
-        _buildStatCardIcon('ENGAGEMENT REACH', '98.4M', '+134%', CyberTheme.green, Icons.people_alt, CyberTheme.cyan),
-        _buildStatCardIcon('ALERT COUNT', '32', '+18%', CyberTheme.green, Icons.warning_amber_rounded, CyberTheme.red),
+        _buildStatCard(
+          'Total Mentions',
+          _formatNumber(kpis['total_mentions']),
+          'Momentum rising',
+          CyberTheme.mint,
+          Icons.trending_up_rounded,
+        ),
+        _buildStatCard(
+          'Threat Score',
+          threatScore is num ? threatScore.toStringAsFixed(1) : '0',
+          kpis['anomaly_level']?.toString().toUpperCase() ?? 'LOW',
+          CyberTheme.blush,
+          Icons.warning_amber_rounded,
+        ),
+        _buildStatCard(
+          'Positive Sentiment',
+          '$posPercent%',
+          'Soft signal',
+          CyberTheme.mint,
+          Icons.sentiment_satisfied_alt_rounded,
+          compactWave: true,
+        ),
+        _buildStatCard(
+          'Negative Sentiment',
+          '$negPercent%',
+          'Watchlist',
+          CyberTheme.blush,
+          Icons.sentiment_dissatisfied_rounded,
+          compactWave: true,
+        ),
+        _buildStatCardIcon(
+          'Net Sentiment',
+          '${kpis['net_sentiment_score'] ?? '0'}',
+          'Balanced index',
+          CyberTheme.lavender,
+          Icons.auto_graph_rounded,
+        ),
+        _buildStatCardIcon(
+          'Trending Topics',
+          '${trendingKeywords.length}',
+          'Active clusters',
+          CyberTheme.amber,
+          Icons.local_fire_department_outlined,
+        ),
+        _buildStatCardIcon(
+          'Engagement Reach',
+          _formatNumber(kpis['total_engagement']),
+          'Audience touch',
+          CyberTheme.sky,
+          Icons.people_alt_outlined,
+        ),
+        _buildStatCardIcon(
+          'Potential Reach',
+          _formatNumber(kpis['potential_reach']),
+          'Projection',
+          CyberTheme.mint,
+          Icons.cell_tower_rounded,
+        ),
       ],
     );
   }
 
-  Widget _buildStatCard(String title, String value, String subtitle, Color subColor, IconData subIcon, {int miniChartMode = 0, bool isThreat = false, bool showSparklineOnly = false}) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildStatCard(
+    String title,
+    String value,
+    String subtitle,
+    Color accent,
+    IconData icon, {
+    bool compactWave = false,
+  }) {
+    return _FloatingPanel(
+      radius: 22,
+      padding: const EdgeInsets.all(13),
+      child: Stack(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: Text(title, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-              const Icon(Icons.more_horiz, color: CyberTheme.textSec, size: 12),
-            ],
+          Positioned.fill(
+            top: compactWave ? 25 : 34,
+            child: CustomPaint(
+              painter: OrganicWavePainter(color: accent, compact: true),
+            ),
           ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (isThreat) const Padding(padding: EdgeInsets.only(bottom: 2, right: 4), child: Icon(Icons.shield, color: CyberTheme.warning, size: 14)),
-              if (showSparklineOnly) Padding(padding: const EdgeInsets.only(bottom: 2, right: 4), child: Icon(subIcon, color: subColor, size: 14)),
-              Expanded(child: Text(value, style: const TextStyle(color: CyberTheme.textMain, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-            ],
-          ),
-          Row(
-            children: [
-              if (!showSparklineOnly) ...[
-                Icon(subIcon, color: subColor, size: 12),
-                Text(subtitle, style: TextStyle(color: subColor, fontSize: 9)),
-                const SizedBox(width: 8),
-              ],
-              if (miniChartMode > 0)
-                Expanded(child: SizedBox(height: 12, child: CustomPaint(painter: MiniSparklinePainter(color: miniChartMode == 1 ? CyberTheme.green : CyberTheme.red)))),
-            ],
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCardIcon(String title, String value, String subtitle, Color subColor, IconData iconRight, Color iconColor) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: Text(title, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-              const Icon(Icons.more_horiz, color: CyberTheme.textSec, size: 12),
-            ],
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(value, style: const TextStyle(color: CyberTheme.textMain, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                    Row(
-                      children: [
-                        Icon(Icons.arrow_drop_up, color: subColor, size: 12),
-                        Text(subtitle, style: TextStyle(color: subColor, fontSize: 9)),
-                      ],
-                    )
-                  ],
-                ),
-              ),
-              Icon(iconRight, color: iconColor, size: 24),
-            ],
-          )
-        ],
-      ),
-    );
-  }
-
-  // --- CARDS LAYOUT ---
-
-  Widget _buildCardBase({required String title, required Widget child, Widget? trailing}) {
-    return Container(
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
-                  Container(width: 2, height: 10, color: CyberTheme.cyan),
-                  const SizedBox(width: 6),
-                  Text(title, style: const TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                  Expanded(child: _SectionLabel(title)),
+                  Icon(icon, color: accent, size: 17),
                 ],
               ),
-              if (trailing != null) trailing,
+              Text(
+                value,
+                style: const TextStyle(
+                  color: CyberTheme.textMain,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              Row(
+                children: [
+                  _SoftDot(color: accent, size: 6),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(color: accent, fontSize: 10),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCardIcon(
+    String title,
+    String value,
+    String subtitle,
+    Color accent,
+    IconData iconRight,
+  ) {
+    return _FloatingPanel(
+      radius: 22,
+      padding: const EdgeInsets.all(13),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _SectionLabel(title),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: CyberTheme.textMain,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(color: accent, fontSize: 10),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          _IconOrb(icon: iconRight, color: accent),
         ],
       ),
     );
   }
 
   Widget _buildSentimentTimeline() {
-    return SizedBox(
-      height: 180,
-      child: _buildCardBase(
-        title: 'SENTIMENT TIMELINE',
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(border: Border.all(color: CyberTheme.border), borderRadius: BorderRadius.circular(4)),
-          child: Row(
-            children: const [Text('24 JAM', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)), Icon(Icons.arrow_drop_down, color: CyberTheme.textSec, size: 12)],
-          ),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                _legendDot('Positive', CyberTheme.green),
-                const SizedBox(width: 8),
-                _legendDot('Negative', CyberTheme.red),
-                const SizedBox(width: 8),
-                _legendDot('Neutral', CyberTheme.textSec),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(child: CustomPaint(painter: SentimentTimelinePainter(), size: Size.infinite)),
-          ],
-        ),
+    return _ChartPanel(
+      title: 'Sentiment Timeline',
+      subtitle: 'Solid flowing waves',
+      height: 190,
+      accent: CyberTheme.mint,
+      child: CustomPaint(
+        painter: SentimentTimelinePainter(),
+        size: Size.infinite,
       ),
     );
   }
 
   Widget _buildSourceDistribution() {
-    return SizedBox(
-      height: 180,
-      child: _buildCardBase(
-        title: 'SOURCE DISTRIBUTION',
-        child: Row(
-          children: [
-            Expanded(
-              flex: 5,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CustomPaint(painter: SourceDonutPainter(), size: const Size(90, 90)),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Text('247', style: TextStyle(color: CyberTheme.textMain, fontSize: 16, fontWeight: FontWeight.bold)),
-                      Text('SOURCES', style: TextStyle(color: CyberTheme.textSec, fontSize: 6)),
-                    ],
-                  )
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 5,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _sourceLegendRow(CyberTheme.cyan, 'X (Twitter)', '35.6%'),
-                  _sourceLegendRow(CyberTheme.red, 'Instagram', '22.8%'),
-                  _sourceLegendRow(CyberTheme.warning, 'YouTube', '16.7%'),
-                  _sourceLegendRow(CyberTheme.green, 'News Portal', '10.2%'),
-                  _sourceLegendRow(Colors.purpleAccent, 'Telegram', '8.1%'),
-                  _sourceLegendRow(Colors.pinkAccent, 'TikTok', '4.3%'),
-                  _sourceLegendRow(CyberTheme.textSec, 'Lainnya', '2.3%'),
-                ],
-              ),
-            )
-          ],
-        ),
-      ),
-    );
-  }
+    final kpis = _dashboardData['kpis'] ?? {};
+    final List sources = kpis['social_share_of_voice'] ?? [];
 
-  Widget _sourceLegendRow(Color color, String label, String pct) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+    Color getColor(String platform) {
+      final name = platform.toLowerCase();
+      if (name == 'x') return CyberTheme.sky;
+      if (name == 'tiktok') return CyberTheme.blush;
+      if (name == 'instagram') return CyberTheme.lavender;
+      if (name == 'threads') return CyberTheme.textMain;
+      return CyberTheme.mint;
+    }
+
+    final chartData = <Map<String, dynamic>>[];
+    for (final src in sources) {
+      final percent = src['share_percent'];
+      if (percent is! num) continue;
+      chartData.add({
+        'val': percent / 100.0,
+        'color': getColor(src['platform'].toString()),
+        'label': src['platform'].toString().toUpperCase(),
+        'percent': percent,
+      });
+    }
+
+    return _ChartPanel(
+      title: 'Share Of Voice',
+      subtitle: 'Solid 3D ring',
+      height: 190,
+      accent: CyberTheme.lavender,
       child: Row(
         children: [
-          Icon(Icons.circle, color: color, size: 6),
-          const SizedBox(width: 4),
-          Expanded(child: Text(label, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8), overflow: TextOverflow.ellipsis)),
-          Text(pct, style: const TextStyle(color: CyberTheme.textMain, fontSize: 8, fontWeight: FontWeight.bold)),
+          Expanded(
+            flex: 5,
+            child: CustomPaint(
+              painter: DynamicDonutPainter(data: chartData),
+              size: const Size(96, 96),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 5,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: chartData.map((e) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Row(
+                    children: [
+                      _SoftDot(color: e['color'] as Color, size: 7),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          e['label'].toString(),
+                          style: const TextStyle(
+                            color: CyberTheme.textSec,
+                            fontSize: 9,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        '${e['percent']}%',
+                        style: const TextStyle(
+                          color: CyberTheme.textMain,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildMentionsOverTime() {
-    return SizedBox(
-      height: 160,
-      child: _buildCardBase(
-        title: 'MENTIONS OVER TIME',
-        trailing: _buildTimeFilter('7 HARI'),
-        child: CustomPaint(painter: MentionsAreaPainter(color: CyberTheme.cyan), size: Size.infinite),
+    return _ChartPanel(
+      title: 'Mentions Over Time',
+      subtitle: 'Flowing volume',
+      height: 166,
+      accent: CyberTheme.sky,
+      child: CustomPaint(
+        painter: OrganicWavePainter(color: CyberTheme.sky),
+        size: Size.infinite,
       ),
     );
   }
 
   Widget _buildAnomalyDetection() {
-    return SizedBox(
-      height: 160,
-      child: _buildCardBase(
-        title: 'ANOMALY DETECTION',
-        trailing: _buildTimeFilter('7 HARI'),
-        child: CustomPaint(painter: AnomalyAreaPainter(color: CyberTheme.red), size: Size.infinite),
+    return _ChartPanel(
+      title: 'Anomaly Detection',
+      subtitle: 'Soft risk plume',
+      height: 166,
+      accent: CyberTheme.blush,
+      child: CustomPaint(
+        painter: AnomalyAreaPainter(color: CyberTheme.blush),
+        size: Size.infinite,
       ),
-    );
-  }
-
-  Widget _buildTimeFilter(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(border: Border.all(color: CyberTheme.border), borderRadius: BorderRadius.circular(4)),
-      child: Text(text, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8)),
     );
   }
 
   Widget _buildMapSection() {
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return _FloatingPanel(
+      height: 232,
+      radius: 24,
+      padding: const EdgeInsets.all(14),
+      child: Stack(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(width: 2, height: 10, color: CyberTheme.cyan),
-                  const SizedBox(width: 6),
-                  const Text('INDONESIA INTELLIGENCE MAP', style: TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                ],
-              ),
-              Row(
-                children: [
-                  const Text('Low', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)),
-                  const SizedBox(width: 4),
-                  Container(
-                    width: 60, height: 4,
-                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), gradient: const LinearGradient(colors: [CyberTheme.cyan, CyberTheme.green, CyberTheme.warning, CyberTheme.red])),
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('High', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)),
-                  const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(border: Border.all(color: CyberTheme.border), borderRadius: BorderRadius.circular(4)),
-                    child: Row(children: const [Text('Mentions', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)), Icon(Icons.arrow_drop_down, color: CyberTheme.textSec, size: 12)]),
-                  ),
-                ],
-              )
-            ],
-          ),
-          Expanded(
-            child: Stack(
+          CustomPaint(painter: MapPainter(), size: Size.infinite),
+          const Positioned(
+            top: 0,
+            left: 0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // MAP PAINTER (Background and Dots)
-                SizedBox(width: double.infinity, height: double.infinity, child: CustomPaint(painter: MapPainter())),
-                
-                // TOP PROVINCES OVERLAY
-                Positioned(
-                  left: 0, bottom: 0,
-                  child: Container(
-                    width: 120,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: CyberTheme.cardBg.withOpacity(0.8), border: Border.all(color: CyberTheme.border), borderRadius: BorderRadius.circular(8)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('TOP PROVINCES', style: TextStyle(color: CyberTheme.textSec, fontSize: 7, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        _provRow('1', 'Jawa Barat', '2.5M'),
-                        _provRow('2', 'Jawa Tengah', '1.8M'),
-                        _provRow('3', 'Jawa Timur', '1.6M'),
-                        _provRow('4', 'DKI Jakarta', '1.3M'),
-                        _provRow('5', 'Sulawesi Selatan', '980K'),
-                        const SizedBox(height: 6),
-                        const Text('Lihat Semua →', style: TextStyle(color: CyberTheme.cyan, fontSize: 7)),
-                      ],
-                    ),
+                Text(
+                  'Indonesia Intelligence Map',
+                  style: TextStyle(
+                    color: CyberTheme.textMain,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                // LAST UPDATE OVERLAY
-                Positioned(
-                  right: 0, bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: CyberTheme.cardBg.withOpacity(0.8), border: Border.all(color: CyberTheme.border), borderRadius: BorderRadius.circular(8)),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.my_location, color: CyberTheme.cyan, size: 16),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Text('Last Update', style: TextStyle(color: CyberTheme.textSec, fontSize: 7)),
-                            Text('13 Mei 2026 21:41', style: TextStyle(color: CyberTheme.textMain, fontSize: 8)),
-                          ],
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: const [
-                            Text('Sources 247', style: TextStyle(color: CyberTheme.textSec, fontSize: 7)),
-                            Text('Mentions 15.7M', style: TextStyle(color: CyberTheme.textSec, fontSize: 7)),
-                          ],
-                        )
-                      ],
-                    ),
-                  ),
-                )
+                SizedBox(height: 3),
+                Text(
+                  'Raised topographic relief',
+                  style: TextStyle(color: CyberTheme.textSec, fontSize: 10),
+                ),
               ],
             ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _provRow(String num, String name, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Row(
-        children: [
-          SizedBox(width: 10, child: Text(num, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8))),
-          Expanded(child: Text(name, style: const TextStyle(color: CyberTheme.textMain, fontSize: 8))),
-          Text(val, style: const TextStyle(color: CyberTheme.green, fontSize: 8, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  // --- HORIZONTAL SCROLL CARDS ---
-
-  Widget _buildInfoCard(String title, Widget content) {
-    return Container(
-      width: 200, // Fixed width for horizontal scrolling
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(_getIconForTitle(title), color: _getColorForTitle(title), size: 12),
-              const SizedBox(width: 6),
-              Text(title, style: TextStyle(color: _getColorForTitle(title), fontSize: 9, fontWeight: FontWeight.bold)),
-            ],
           ),
-          const SizedBox(height: 8),
-          Expanded(child: content),
-          const SizedBox(height: 6),
-          const Text('Lihat Semua >', style: TextStyle(color: CyberTheme.textSec, fontSize: 8)),
         ],
       ),
     );
   }
 
   Widget _buildInfoCardWide(String title, Widget content) {
+    return _FloatingPanel(
+      width: 286,
+      margin: const EdgeInsets.only(right: 12),
+      radius: 22,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _PanelTitle(title, accent: CyberTheme.sky),
+          const SizedBox(height: 10),
+          Expanded(child: content),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoCard(
+    String title,
+    Widget content, {
+    Color accent = CyberTheme.lavender,
+  }) {
+    return _FloatingPanel(
+      width: 206,
+      margin: const EdgeInsets.only(right: 12),
+      radius: 22,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _PanelTitle(title, accent: accent),
+          const SizedBox(height: 10),
+          Expanded(child: content),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiSummaryContent() {
+    return const Text(
+      'Terdeteksi pola narasi terkait "stabilitas nasional" dan "konflik sosial". Engagement terbesar berasal dari X dan TikTok.',
+      style: TextStyle(color: CyberTheme.textSec, fontSize: 11, height: 1.55),
+    );
+  }
+
+  Widget _buildAlertCenterContent() {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SignalRow(
+          color: CyberTheme.blush,
+          label: 'Volume spike detected',
+          value: '100%',
+        ),
+        SizedBox(height: 8),
+        _SignalRow(
+          color: CyberTheme.amber,
+          label: 'High anomaly level',
+          value: 'Review',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSuspiciousContent() {
+    final kpis = _dashboardData['kpis'] ?? {};
+    final signals = kpis['threat_signals'] ?? {};
+    final negRatio = signals['negative_ratio'] ?? '3.04';
+
+    return Text(
+      'Negative ratio $negRatio. Narasi kritikal perlu dipantau secara berkelanjutan.',
+      style: const TextStyle(color: CyberTheme.textSec, fontSize: 11, height: 1.45),
+    );
+  }
+
+  Widget _buildBotContent() {
+    return const Text(
+      'Analyzing network clusters for automated behavior signatures.',
+      style: TextStyle(color: CyberTheme.textSec, fontSize: 11, height: 1.45),
+    );
+  }
+
+  Widget _buildHashtagsContent() {
+    final hashtags = _dashboardData['top_trending_hashtags'] as List? ?? [];
+    if (hashtags.isEmpty) return const _EmptyState();
+
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: math.min(hashtags.length, 5),
+      itemBuilder: (context, index) {
+        final tag = hashtags[index];
+        return _FloatingTextRow(
+          label: tag['hashtag'].toString(),
+          value: tag['total'].toString(),
+          color: CyberTheme.sky,
+        );
+      },
+    );
+  }
+
+  Widget _buildTopAuthorsContent() {
+    final authors = _dashboardData['top_influential_authors'] as List? ?? [];
+    if (authors.isEmpty) return const _EmptyState();
+
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: math.min(authors.length, 5),
+      itemBuilder: (context, index) {
+        final author = authors[index];
+        return _FloatingTextRow(
+          label: '@${author['username']}',
+          value: _formatNumber(author['followers']),
+          color: CyberTheme.mint,
+        );
+      },
+    );
+  }
+
+  Widget _buildTrendingKeywords() {
+    final keywords = _dashboardData['top_trending_keywords'] as List? ?? [];
+    if (keywords.isEmpty) return const _EmptyState();
+
+    return ListView.builder(
+      padding: EdgeInsets.zero,
+      itemCount: math.min(keywords.length, 5),
+      itemBuilder: (context, index) {
+        final kw = keywords[index];
+        final size = 11.0 + (math.min(index, 3) * 1.1);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            kw['keyword'].toString(),
+            style: TextStyle(
+              color: index.isEven ? CyberTheme.lavender : CyberTheme.textMain,
+              fontSize: size,
+              fontWeight: FontWeight.w500,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildViralContent() {
+    return const Text(
+      'Video from @officialinews reached 3.3M views with elevated resonance.',
+      style: TextStyle(color: CyberTheme.textSec, fontSize: 11, height: 1.45),
+    );
+  }
+
+  Widget _buildCyberBottomNav() {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: _FloatingPanel(
+          radius: 24,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _navItem(Icons.dashboard_outlined, 'Dashboard', isActive: true),
+              _navItem(
+                Icons.wifi_tethering_outlined,
+                'Feed',
+                onTap: () => Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const FeedScreen()),
+                ),
+              ),
+              _navItem(
+                Icons.bar_chart_rounded,
+                'Analytics',
+                onTap: () => Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+                ),
+              ),
+              _navItem(
+                Icons.public_rounded,
+                'GeoIntel',
+                onTap: () => Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GeoIntelScreen()),
+                ),
+              ),
+              _navItem(
+                Icons.shield_outlined,
+                'Threat',
+                onTap: () => Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ThreatScreen()),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(
+    IconData icon,
+    String label, {
+    bool isActive = false,
+    VoidCallback? onTap,
+  }) {
+    final color = isActive ? CyberTheme.lavender : CyberTheme.textMuted;
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 9,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardBackdrop extends StatelessWidget {
+  const _DashboardBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment(-0.55, -0.85),
+          radius: 1.25,
+          colors: [
+            Color(0xFF172235),
+            CyberTheme.background,
+            CyberTheme.backgroundDeep,
+          ],
+          stops: [0, 0.48, 1],
+        ),
+      ),
+      child: CustomPaint(
+        painter: _AtmosphericGridPainter(),
+        size: Size.infinite,
+      ),
+    );
+  }
+}
+
+class _FloatingPanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry? margin;
+  final double radius;
+  final double? width;
+  final double? height;
+
+  const _FloatingPanel({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.margin,
+    this.radius = 20,
+    this.width,
+    this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      width: 280, 
-      decoration: BoxDecoration(color: CyberTheme.cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: CyberTheme.border)),
-      padding: const EdgeInsets.all(10),
+      width: width,
+      height: height,
+      margin: margin,
+      padding: padding,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [CyberTheme.panelSoft, CyberTheme.panel],
+        ),
+        border: Border.all(color: CyberTheme.line),
+        boxShadow: [
+          const BoxShadow(
+            color: CyberTheme.shadow,
+            blurRadius: 28,
+            offset: Offset(0, 16),
+          ),
+          const BoxShadow(
+            color: CyberTheme.surfaceLow,
+            blurRadius: 14,
+            offset: Offset(0, -2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ChartPanel extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final double height;
+  final Color accent;
+  final Widget child;
+
+  const _ChartPanel({
+    required this.title,
+    required this.subtitle,
+    required this.height,
+    required this.accent,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _FloatingPanel(
+      height: height,
+      radius: 24,
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.memory, color: CyberTheme.cyan, size: 12),
-              const SizedBox(width: 6),
-              Text(title, style: const TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold)),
+              Expanded(child: _PanelTitle(title, accent: accent)),
+              _SoftDot(color: accent, size: 8),
             ],
           ),
-          const SizedBox(height: 8),
-          Expanded(child: content),
-          const SizedBox(height: 6),
-          const Text('Lihat Ringkasan Lengkap >', style: TextStyle(color: CyberTheme.cyan, fontSize: 8)),
-        ],
-      ),
-    );
-  }
-
-  IconData _getIconForTitle(String t) {
-    if (t.contains('THREAT')) return Icons.warning_amber;
-    if (t.contains('SUSPICIOUS')) return Icons.remove_red_eye_outlined;
-    if (t.contains('BOT')) return Icons.smart_toy_outlined;
-    if (t.contains('TRENDING')) return Icons.tag;
-    if (t.contains('VIRAL')) return Icons.play_circle_outline;
-    if (t.contains('AUTHORS')) return Icons.people_outline;
-    if (t.contains('ENGAGEMENT')) return Icons.show_chart;
-    return Icons.info_outline;
-  }
-
-  Color _getColorForTitle(String t) {
-    if (t.contains('THREAT')) return CyberTheme.red;
-    if (t.contains('SUSPICIOUS')) return CyberTheme.cyan;
-    if (t.contains('BOT')) return CyberTheme.cyan;
-    return CyberTheme.textSec;
-  }
-
-  // Card Contents
-  Widget _buildAiSummaryContent() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _bulletText('Peningkatan percakapan signifikan terkait isu pengadaan alutsista dan militer TNI AU dalam 24 jam terakhir. Sentimen negatif meningkat di beberapa wilayah terkait potensi disinformasi.'),
-      ],
-    );
-  }
-
-  Widget _buildAlertCenterContent() {
-    return Column(
-      children: [
-        _alertRow(Icons.warning, 'Disinformation Campaign', 'High', CyberTheme.red),
-        _alertRow(Icons.campaign, 'Propaganda Activity', 'High', CyberTheme.red),
-        _alertRow(Icons.hub, 'Suspicious Network', 'Medium', CyberTheme.warning),
-        _alertRow(Icons.find_replace, 'Information Manipulation', 'Medium', CyberTheme.warning),
-      ],
-    );
-  }
-
-  Widget _alertRow(IconData icon, String label, String level, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 10),
-          const SizedBox(width: 4),
-          Expanded(child: Text(label, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8), overflow: TextOverflow.ellipsis)),
-          Text(level, style: TextStyle(color: color, fontSize: 8, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSuspiciousContent() {
-    return Column(
-      children: [
-        _suspiciousRow('[Unusual Keyword Spike]', '14:32'),
-        _suspiciousRow('Coordinated Narrative', '13:18'),
-        _suspiciousRow('Mass Reporting Activity', '12:05'),
-        _suspiciousRow('Abnormal Engagement', '10:47'),
-      ],
-    );
-  }
-
-  Widget _suspiciousRow(String label, String time) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(child: Text(label, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8), overflow: TextOverflow.ellipsis)),
-          Text(time, style: const TextStyle(color: CyberTheme.textMain, fontSize: 8)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBotContent() {
-    return Row(
-      children: [
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox(
-              width: 50, height: 50,
-              child: CircularProgressIndicator(value: 0.38, strokeWidth: 4, backgroundColor: CyberTheme.border, color: CyberTheme.cyan),
-            ),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('38%', style: TextStyle(color: CyberTheme.textMain, fontSize: 12, fontWeight: FontWeight.bold)),
-                Text('Bot Probability', style: TextStyle(color: CyberTheme.textSec, fontSize: 5)),
-              ],
-            )
-          ],
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _botRow('High Risk', '124'),
-              _botRow('Medium Risk', '245'),
-              _botRow('Low Risk', '1,024'),
-            ],
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: const TextStyle(color: CyberTheme.textMuted, fontSize: 10),
           ),
-        )
-      ],
-    );
-  }
-  
-  Widget _botRow(String label, String val) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8)),
-        Text(val, style: const TextStyle(color: CyberTheme.textMain, fontSize: 8, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _buildHashtagsContent() {
-    return Column(
-      children: [
-        _hashRow('#tni', '12.5K'),
-        _hashRow('#natuna', '8.2K'),
-        _hashRow('#alutsista', '6.1K'),
-      ],
-    );
-  }
-
-  Widget _hashRow(String tag, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(tag, style: const TextStyle(color: CyberTheme.textSec, fontSize: 9)),
-          Text(val, style: const TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildViralContent() {
-     return Column(
-      children: [
-        _viralRow(Icons.play_arrow, 'Video', '23'),
-        _viralRow(Icons.image, 'Image', '18'),
-        _viralRow(Icons.article, 'Article', '9'),
-      ],
-    );
-  }
-
-  Widget _viralRow(IconData icon, String type, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(icon, color: CyberTheme.cyan, size: 10),
-          const SizedBox(width: 6),
-          Expanded(child: Text(type, style: const TextStyle(color: CyberTheme.textSec, fontSize: 9))),
-          Text(val, style: const TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTopAuthorsContent() {
-     return Column(
-      children: [
-        _authorRow(Icons.person, 'Influential', '128'),
-        _authorRow(Icons.group, 'Active', '247'),
-        _authorRow(Icons.person_add, 'New', '53'),
-      ],
-    );
-  }
-
-  Widget _authorRow(IconData icon, String type, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(icon, color: CyberTheme.cyan, size: 10),
-          const SizedBox(width: 6),
-          Expanded(child: Text(type, style: const TextStyle(color: CyberTheme.textSec, fontSize: 9))),
-          Text(val, style: const TextStyle(color: CyberTheme.textMain, fontSize: 9, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEngagementContent() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: const [
-            Text('Avg. Rate', style: TextStyle(color: CyberTheme.textSec, fontSize: 9)),
-            Text('6.78%', style: TextStyle(color: CyberTheme.textMain, fontSize: 10, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: const [
-            Text('Max. Rate', style: TextStyle(color: CyberTheme.textSec, fontSize: 9)),
-            Text('24.12%', style: TextStyle(color: CyberTheme.textMain, fontSize: 10, fontWeight: FontWeight.bold)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _bulletText(String text) {
-    return Text(text, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8, height: 1.4), maxLines: 4, overflow: TextOverflow.ellipsis);
-  }
-
-  Widget _legendDot(String label, Color color) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.circle, size: 6, color: color),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(color: CyberTheme.textSec, fontSize: 8)),
-      ],
-    );
-  }
-
-  // --- BOTTOM NAV ---
-  Widget _buildCyberBottomNav() {
-    return Container(
-      height: 60,
-      decoration: const BoxDecoration(
-        color: CyberTheme.cardBg,
-        border: Border(top: BorderSide(color: CyberTheme.border)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _navItem(Icons.dashboard, 'Dashboard', isActive: true),
-          
-          _navItem(Icons.wifi_tethering, 'Feed', onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const FeedScreen()));
-          }),
-          
-          _navItem(Icons.bar_chart, 'Analytics', onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const AnalyticsScreen()));
-          }),
-          
-          _navItem(Icons.public, 'GeoIntel', onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const GeoIntelScreen()));
-          }),
-          
-          _navItem(Icons.shield_outlined, 'Threat', onTap: () {
-  Navigator.push(context, MaterialPageRoute(builder: (_) => const ThreatScreen()));
-}),
-        ],
-      ),
-    );
-  }
-
-  Widget _navItem(IconData icon, String label, {bool isActive = false, VoidCallback? onTap}) {
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: isActive ? CyberTheme.cyan : CyberTheme.textSec, size: 20),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: isActive ? CyberTheme.cyan : CyberTheme.textSec, fontSize: 8)),
-          if (isActive) Container(margin: const EdgeInsets.only(top: 4), width: 20, height: 2, color: CyberTheme.cyan)
+          const SizedBox(height: 10),
+          Expanded(child: child),
         ],
       ),
     );
   }
 }
 
-// ===========================================================================
-// CUSTOM PAINTERS 
-// ===========================================================================
+class _BrandMark extends StatelessWidget {
+  const _BrandMark();
 
-class MiniSparklinePainter extends CustomPainter {
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'AIRA',
+          style: TextStyle(
+            color: CyberTheme.textMain,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.1,
+          ),
+        ),
+        Text(
+          'Advanced Intelligence',
+          style: TextStyle(
+            color: CyberTheme.textSec,
+            fontSize: 9,
+            height: 1.15,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PanelTitle extends StatelessWidget {
+  final String title;
+  final Color accent;
+
+  const _PanelTitle(this.title, {required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: TextStyle(
+        color: accent,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String label;
+
+  const _SectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+        color: CyberTheme.textSec,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _IconBubble extends StatelessWidget {
+  final IconData icon;
+
+  const _IconBubble({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return _FloatingPanel(
+      radius: 18,
+      padding: const EdgeInsets.all(10),
+      child: Icon(icon, color: CyberTheme.textSec, size: 18),
+    );
+  }
+}
+
+class _IconOrb extends StatelessWidget {
+  final IconData icon;
   final Color color;
-  MiniSparklinePainter({required this.color});
+
+  const _IconOrb({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(colors: [color, CyberTheme.panelRaised]),
+        boxShadow: [const BoxShadow(color: CyberTheme.shadow, blurRadius: 18)],
+      ),
+      child: Icon(icon, color: color, size: 20),
+    );
+  }
+}
+
+class _SoftDot extends StatelessWidget {
+  final Color color;
+  final double size;
+
+  const _SoftDot({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: [
+          BoxShadow(color: CyberTheme.shadow, blurRadius: size * 2.4),
+        ],
+      ),
+    );
+  }
+}
+
+class _SignalRow extends StatelessWidget {
+  final Color color;
+  final String label;
+  final String value;
+
+  const _SignalRow({
+    required this.color,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _SoftDot(color: color, size: 7),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: CyberTheme.textSec, fontSize: 10),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FloatingTextRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _FloatingTextRow({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: const TextStyle(color: CyberTheme.textSec, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'No data',
+      style: TextStyle(color: CyberTheme.textMuted, fontSize: 11),
+    );
+  }
+}
+
+class _AtmosphericGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.width <= 0) return;
-    final paint = Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 1.5;
-    final path = Path();
-    path.moveTo(0, size.height * 0.8);
-    path.lineTo(size.width * 0.2, size.height * 0.4);
-    path.lineTo(size.width * 0.4, size.height * 0.6);
-    path.lineTo(size.width * 0.6, size.height * 0.2);
-    path.lineTo(size.width * 0.8, size.height * 0.5);
-    path.lineTo(size.width, 0);
-    canvas.drawPath(path, paint);
+    final paint = Paint()
+      ..color = CyberTheme.surfaceLow
+      ..strokeWidth = 1;
+    for (double y = 34; y < size.height; y += 58) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+    for (double x = 24; x < size.width; x += 64) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class OrganicWavePainter extends CustomPainter {
+  final Color color;
+  final bool compact;
+
+  OrganicWavePainter({required this.color, this.compact = false});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final heightFactor = compact ? 0.35 : 0.5;
+    final baseline = size.height * (compact ? 0.62 : 0.58);
+    final path = Path()..moveTo(0, baseline);
+
+    for (double x = 0; x <= size.width; x += size.width / 7) {
+      final nextX = x + size.width / 7;
+      final controlX = x + size.width / 14;
+      final wave =
+          math.sin((x / size.width) * math.pi * 2.3) * size.height * 0.18;
+      final y =
+          baseline -
+          (math.sin((nextX / size.width) * math.pi * 1.4) *
+              size.height *
+              heightFactor *
+              0.38) -
+          wave;
+      path.quadraticBezierTo(
+        controlX,
+        baseline + wave * 0.5,
+        nextX,
+        y.clamp(0, size.height),
+      );
+    }
+
+    final fillPath = Path.from(path)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    final fill = Paint()
+      ..shader = ui.Gradient.linear(const Offset(0, 0), Offset(0, size.height), [
+        color,
+        CyberTheme.surfaceLow,
+      ]);
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = compact ? 1.4 : 2.2
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+    final shine = Paint()
+      ..color = CyberTheme.highlight
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = compact ? 0.6 : 1;
+
+    canvas.drawPath(fillPath, fill);
+    canvas.drawPath(path, stroke);
+    canvas.drawPath(path.shift(const Offset(0, -2)), shine);
+  }
+
+  @override
+  bool shouldRepaint(covariant OrganicWavePainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.compact != compact;
+  }
 }
 
 class SentimentTimelinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.width == 0) return;
-    final chartHeight = size.height - 16;
-    final chartWidth = size.width;
-
-    // Y Axis labels
-    final yLabels = ['100%', '75%', '50%', '25%', '0%'];
-    final gridPaint = Paint()..color = CyberTheme.border..strokeWidth = 1;
-    for (int i = 0; i < yLabels.length; i++) {
-      final y = chartHeight * (i / (yLabels.length - 1));
-      canvas.drawLine(Offset(0, y), Offset(chartWidth, y), gridPaint);
-      final tp = TextPainter(text: TextSpan(text: yLabels[i], style: const TextStyle(color: CyberTheme.textSec, fontSize: 6)), textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, Offset(0, y - 8));
+    final colors = [CyberTheme.mint, CyberTheme.lavender, CyberTheme.blush];
+    for (var i = 0; i < colors.length; i++) {
+      final path = Path();
+      final baseline = size.height * (0.35 + i * 0.16);
+      path.moveTo(0, baseline);
+      for (double x = 0; x <= size.width; x += size.width / 6) {
+        final nextX = x + size.width / 6;
+        final controlX = x + size.width / 12;
+        final y =
+            baseline +
+            math.sin((x / size.width * math.pi * 2) + i) * size.height * 0.18;
+        path.quadraticBezierTo(
+          controlX,
+          baseline - size.height * 0.16,
+          nextX,
+          y,
+        );
+      }
+      final stroke = Paint()
+        ..color = colors[i]
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 2.2
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.6);
+      canvas.drawPath(path, stroke);
     }
-
-    // X Axis labels
-    final xLabels = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'];
-    for (int i = 0; i < xLabels.length; i++) {
-      final tp = TextPainter(text: TextSpan(text: xLabels[i], style: const TextStyle(color: CyberTheme.textSec, fontSize: 6)), textDirection: TextDirection.ltr)..layout();
-      double x = (chartWidth - tp.width) * (i / (xLabels.length - 1));
-      if (i == 0) x = 16;
-      tp.paint(canvas, Offset(x, chartHeight + 4));
-    }
-
-    // Draw Lines
-    _drawLineWithDots(canvas, chartWidth, chartHeight, [0.3, 0.2, 0.4, 0.3, 0.5, 0.2, 0.4, 0.3, 0.2, 0.5, 0.3], CyberTheme.green);
-    _drawLineWithDots(canvas, chartWidth, chartHeight, [0.6, 0.5, 0.7, 0.6, 0.8, 0.5, 0.7, 0.6, 0.5, 0.8, 0.6], CyberTheme.red);
-    _drawLineWithDots(canvas, chartWidth, chartHeight, [0.8, 0.9, 0.85, 0.95, 0.9, 0.85, 0.95, 0.9, 0.8, 0.9, 0.85], CyberTheme.textSec);
   }
 
-  void _drawLineWithDots(Canvas canvas, double w, double h, List<double> points, Color color) {
-    final path = Path();
-    final paint = Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 1.5;
-    final dotPaint = Paint()..color = color..style = PaintingStyle.fill;
-    
-    for (int i = 0; i < points.length; i++) {
-      final x = w * (i / (points.length - 1));
-      final y = h * points[i];
-      if (i == 0) path.moveTo(x, y);
-      else path.lineTo(x, y);
-      canvas.drawCircle(Offset(x, y), 2, dotPaint);
-      canvas.drawCircle(Offset(x, y), 1, Paint()..color = CyberTheme.background); // Inner hole
-    }
-    canvas.drawPath(path, paint);
-  }
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class MentionsAreaPainter extends CustomPainter {
-  final Color color;
-  MentionsAreaPainter({required this.color});
+class DynamicDonutPainter extends CustomPainter {
+  final List<Map<String, dynamic>> data;
+
+  DynamicDonutPainter({required this.data});
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.width == 0) return;
-    final chartHeight = size.height - 16;
-    final chartWidth = size.width;
-
-    // Grid
-    for (int i = 0; i < 5; i++) {
-      final y = chartHeight * (i / 4);
-      canvas.drawLine(Offset(0, y), Offset(chartWidth, y), Paint()..color = CyberTheme.border..strokeWidth = 1);
+    if (data.isEmpty) {
+      final emptyPaint = Paint()
+        ..color = CyberTheme.lavender
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 14
+        ..strokeCap = StrokeCap.round;
+      canvas.drawCircle(
+        size.center(Offset.zero),
+        math.min(size.width, size.height) * 0.3,
+        emptyPaint,
+      );
+      return;
     }
 
-    List<double> points = [0.8, 0.7, 0.9, 0.8, 0.6, 0.5, 0.4, 0.3, 0.4, 0.2, 0.1];
-    final path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final x = chartWidth * (i / (points.length - 1));
-      final y = chartHeight * points[i];
-      if (i == 0) path.moveTo(x, y);
-      else path.lineTo(x, y);
-      
-      canvas.drawCircle(Offset(x,y), 2, Paint()..color=color);
+    final center = size.center(Offset.zero);
+    final radius = math.min(size.width, size.height) * 0.31;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final base = Paint()
+      ..color = CyberTheme.panelRaised
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 16
+      ..strokeCap = StrokeCap.round;
+    canvas.drawCircle(center.translate(0, 4), radius, base);
+
+    double startAngle = -math.pi / 2;
+    for (final d in data) {
+      final sweepAngle = (d['val'] as double) * 2 * math.pi;
+      final color = d['color'] as Color;
+      final shadowPaint = Paint()
+        ..color = CyberTheme.shadow
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 20
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      final paint = Paint()
+        ..shader = ui.Gradient.sweep(
+          center,
+          [color, color, CyberTheme.highlight, color],
+          [0, 0.45, 0.65, 1],
+        )
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 13
+        ..strokeCap = StrokeCap.round;
+      canvas.drawArc(
+        rect.shift(const Offset(0, 5)),
+        startAngle,
+        sweepAngle,
+        false,
+        shadowPaint,
+      );
+      canvas.drawArc(rect, startAngle, sweepAngle, false, paint);
+      startAngle += sweepAngle;
     }
 
-    final fillPath = Path.from(path)..lineTo(chartWidth, chartHeight)..lineTo(0, chartHeight)..close();
-    canvas.drawPath(fillPath, Paint()..shader = LinearGradient(colors: [color.withOpacity(0.3), color.withOpacity(0.0)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(Rect.fromLTRB(0, 0, 0, chartHeight)));
-    canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 1.5);
-    
-    // Label pop
-    _drawPopupLabel(canvas, chartWidth * 0.5, chartHeight * 0.5 - 20, '12 Mei\n15.7M Mentions', color);
+    final core = Paint()
+      ..shader = ui.Gradient.radial(center, radius * 0.78, [
+        CyberTheme.panelRaised,
+        CyberTheme.surfaceLow,
+      ]);
+    canvas.drawCircle(center, radius * 0.82, core);
   }
 
-  void _drawPopupLabel(Canvas canvas, double x, double y, String text, Color color) {
-    final rect = Rect.fromCenter(center: Offset(x, y), width: 60, height: 24);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), Paint()..color = CyberTheme.background..style = PaintingStyle.fill);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), Paint()..color = CyberTheme.border..style = PaintingStyle.stroke);
-    final tp = TextPainter(text: TextSpan(text: text, style: const TextStyle(color: CyberTheme.textSec, fontSize: 6)), textAlign: TextAlign.center, textDirection: TextDirection.ltr)..layout();
-    tp.paint(canvas, Offset(x - tp.width/2, y - tp.height/2));
-  }
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant DynamicDonutPainter oldDelegate) => true;
 }
 
 class AnomalyAreaPainter extends CustomPainter {
   final Color color;
+
   AnomalyAreaPainter({required this.color});
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (size.width == 0) return;
-    final chartHeight = size.height - 16;
-    final chartWidth = size.width;
-
-    // Grid
-    for (int i = 0; i < 5; i++) {
-      final y = chartHeight * (i / 4);
-      canvas.drawLine(Offset(0, y), Offset(chartWidth, y), Paint()..color = CyberTheme.border..strokeWidth = 1);
-    }
-
-    List<double> points = [0.8, 0.7, 0.8, 0.6, 0.7, 0.4, 0.7, 0.5, 0.2, 0.4, 0.1, 0.3];
-    final path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final x = chartWidth * (i / (points.length - 1));
-      final y = chartHeight * points[i];
-      if (i == 0) path.moveTo(x, y);
-      else path.lineTo(x, y);
-      canvas.drawCircle(Offset(x,y), 2, Paint()..color=color);
-    }
-
-    final fillPath = Path.from(path)..lineTo(chartWidth, chartHeight)..lineTo(0, chartHeight)..close();
-    canvas.drawPath(fillPath, Paint()..shader = LinearGradient(colors: [color.withOpacity(0.3), color.withOpacity(0.0)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(Rect.fromLTRB(0, 0, 0, chartHeight)));
-    canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 1.5);
-    
-    // Label pop
-    _drawPopupLabel(canvas, chartWidth * 0.6, chartHeight * 0.4 - 20, 'Spike Detected\n12 Mei 14:00', color);
-  }
-  void _drawPopupLabel(Canvas canvas, double x, double y, String text, Color color) {
-    final rect = Rect.fromCenter(center: Offset(x, y), width: 60, height: 24);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), Paint()..color = CyberTheme.background..style = PaintingStyle.fill);
-    canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), Paint()..color = CyberTheme.border..style = PaintingStyle.stroke);
-    final tp = TextPainter(text: TextSpan(text: text, style: TextStyle(color: color, fontSize: 6)), textAlign: TextAlign.center, textDirection: TextDirection.ltr)..layout();
-    tp.paint(canvas, Offset(x - tp.width/2, y - tp.height/2));
-  }
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class SourceDonutPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 8;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final strokeWidth = 16.0;
-
-    final data = [
-      {'val': 0.35, 'color': CyberTheme.cyan},
-      {'val': 0.22, 'color': CyberTheme.red},
-      {'val': 0.16, 'color': CyberTheme.warning},
-      {'val': 0.10, 'color': CyberTheme.green},
-      {'val': 0.08, 'color': Colors.purpleAccent},
-      {'val': 0.09, 'color': CyberTheme.textSec},
-    ];
-
-    double startAngle = -math.pi / 2;
-    for (var d in data) {
-      final sweepAngle = (d['val'] as double) * 2 * math.pi;
-      final paint = Paint()
-        ..color = d['color'] as Color
+    final path = Path()
+      ..moveTo(0, size.height * 0.82)
+      ..cubicTo(
+        size.width * 0.22,
+        size.height * 0.62,
+        size.width * 0.38,
+        size.height * 0.9,
+        size.width * 0.56,
+        size.height * 0.52,
+      )
+      ..cubicTo(
+        size.width * 0.68,
+        size.height * 0.26,
+        size.width * 0.73,
+        size.height * 0.05,
+        size.width * 0.82,
+        size.height * 0.18,
+      )
+      ..cubicTo(
+        size.width * 0.9,
+        size.height * 0.32,
+        size.width * 0.94,
+        size.height * 0.58,
+        size.width,
+        size.height * 0.44,
+      );
+    final fillPath = Path.from(path)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = ui.Gradient.linear(Offset.zero, Offset(0, size.height), [
+          color,
+          CyberTheme.surfaceLow,
+        ]),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth;
-      
-      // Glow effect
-      canvas.drawArc(rect, startAngle, sweepAngle - 0.05, false, Paint()..color = (d['color'] as Color).withOpacity(0.3)..style=PaintingStyle.stroke..strokeWidth=strokeWidth..maskFilter=const MaskFilter.blur(BlurStyle.normal, 5));
-      canvas.drawArc(rect, startAngle, sweepAngle - 0.05, false, paint);
-      
-      startAngle += sweepAngle;
-    }
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 2.2
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.4),
+    );
+    canvas.drawCircle(
+      Offset(size.width * 0.82, size.height * 0.18),
+      7,
+      Paint()..color = CyberTheme.panelRaised,
+    );
+    canvas.drawCircle(
+      Offset(size.width * 0.82, size.height * 0.18),
+      3,
+      Paint()..color = color,
+    );
   }
+
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant AnomalyAreaPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 class MapPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    // Simulating map with glowing dots roughly shaped like Indonesia
-    final dotPaintCyan = Paint()..color = CyberTheme.cyan..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    final dotPaintRed = Paint()..color = CyberTheme.red..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-    final dotPaintYellow = Paint()..color = CyberTheme.warning..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    final dotPaintGreen = Paint()..color = CyberTheme.green..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    final centerY = size.height * 0.58;
+    final islandPaint = Paint()
+      ..color = CyberTheme.panelRaised
+      ..style = PaintingStyle.fill
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
+    final crestPaint = Paint()
+      ..color = CyberTheme.surface
+      ..style = PaintingStyle.fill;
+    final edgePaint = Paint()
+      ..color = CyberTheme.sky
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final basePaint = Paint()
+      ..color = CyberTheme.shadow
+      ..style = PaintingStyle.fill
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
 
-    final dots = [
-      // Sumatera area
-      Offset(size.width * 0.2, size.height * 0.4), Offset(size.width * 0.25, size.height * 0.5), Offset(size.width * 0.3, size.height * 0.6),
-      // Java area (Red hot)
-      Offset(size.width * 0.35, size.height * 0.75), Offset(size.width * 0.4, size.height * 0.78), Offset(size.width * 0.48, size.height * 0.76),
-      // Kalimantan
-      Offset(size.width * 0.45, size.height * 0.4), Offset(size.width * 0.5, size.height * 0.5), Offset(size.width * 0.55, size.height * 0.45),
-      // Sulawesi
-      Offset(size.width * 0.6, size.height * 0.5), Offset(size.width * 0.65, size.height * 0.6), Offset(size.width * 0.62, size.height * 0.7),
-      // Papua area
-      Offset(size.width * 0.8, size.height * 0.5), Offset(size.width * 0.85, size.height * 0.55), Offset(size.width * 0.9, size.height * 0.6),
+    final islands = [
+      Rect.fromLTWH(size.width * 0.12, centerY - 18, size.width * 0.23, 22),
+      Rect.fromLTWH(size.width * 0.36, centerY - 2, size.width * 0.2, 16),
+      Rect.fromLTWH(size.width * 0.55, centerY - 31, size.width * 0.18, 23),
+      Rect.fromLTWH(size.width * 0.69, centerY + 2, size.width * 0.18, 18),
+      Rect.fromLTWH(size.width * 0.42, centerY + 30, size.width * 0.12, 13),
     ];
 
-    for (int i = 0; i < dots.length; i++) {
-      Paint p = dotPaintCyan;
-      double r = 4.0;
-      if (i >= 3 && i <= 5) { p = dotPaintRed; r = 6.0; } // Java is hot
-      else if (i == 7 || i == 11) { p = dotPaintYellow; r = 5.0; }
-      else if (i == 1 || i == 13) { p = dotPaintGreen; r = 4.0; }
-      
-      canvas.drawCircle(dots[i], r, p);
-      canvas.drawCircle(dots[i], r/2, Paint()..color=Colors.white); // bright center
+    for (final rect in islands) {
+      final rrect = RRect.fromRectAndRadius(
+        rect.translate(0, 8),
+        const Radius.circular(16),
+      );
+      canvas.drawRRect(rrect, basePaint);
     }
+    for (final rect in islands) {
+      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(16));
+      canvas.drawRRect(rrect, islandPaint);
+      canvas.drawRRect(rrect, edgePaint);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          rect.deflate(4).translate(0, -2),
+          const Radius.circular(14),
+        ),
+        crestPaint,
+      );
+    }
+
+    final scanPaint = Paint()
+      ..color = CyberTheme.line
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (var i = 0; i < 4; i++) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(size.width * 0.5, centerY + 9),
+          width: size.width * (0.34 + i * 0.14),
+          height: 24 + i * 16,
+        ),
+        scanPaint,
+      );
+    }
+
+    _drawPulse(
+      canvas,
+      Offset(size.width * 0.24, centerY - 11),
+      CyberTheme.mint,
+      11,
+    );
+    _drawPulse(
+      canvas,
+      Offset(size.width * 0.51, centerY + 5),
+      CyberTheme.blush,
+      15,
+    );
+    _drawPulse(
+      canvas,
+      Offset(size.width * 0.74, centerY - 18),
+      CyberTheme.lavender,
+      10,
+    );
   }
+
+  void _drawPulse(Canvas canvas, Offset center, Color color, double radius) {
+    canvas.drawCircle(
+      center,
+      radius * 1.9,
+      Paint()
+        ..color = CyberTheme.shadow
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+    canvas.drawCircle(center, radius, Paint()..color = CyberTheme.panelRaised);
+    canvas.drawCircle(center, radius * 0.34, Paint()..color = color);
+  }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
